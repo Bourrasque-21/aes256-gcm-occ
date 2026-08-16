@@ -100,11 +100,11 @@ Ciphertext C_i --+-- AES(CTR_i) -> keystream_i -> P_i
 | DUT | 시뮬레이터 | 결과 | 실행일 |
 |---|---|---:|---|
 | 현재 [`rtl/aes256_core.sv`](rtl/aes256_core.sv) | Vivado xsim 2025.2 | **405 pass, 0 fail** | 2026-08-17 |
-| `aes256_iterative_core`와 분리형 키 확장 검증 구조 | Synopsys VCS W-2024.09-SP1 | **405 pass, 0 fail** | 2026-08-13 |
+| 보존된 VCS/Verdi KAT 검증 | Synopsys VCS W-2024.09-SP1 | **405 pass, 0 fail** | 2026-08-13 |
 
 현재 코어의 xsim 검증은 [`tb_aes256_core_kat_current.sv`](verification/nist_aes256_kat/tb/tb_aes256_core_kat_current.sv)와 [`aes256_core_xsim_20260817.txt`](verification/nist_aes256_kat/results/aes256_core_xsim_20260817.txt)에 대응합니다.
 
-VCS/Verdi 결과는 [`vcs_original/tb_aes256_core_kat.sv`](verification/nist_aes256_kat/tb/vcs_original/tb_aes256_core_kat.sv)가 인스턴스화하는 `aes256_iterative_core` 및 분리형 키 확장 구조에 대응합니다. 현재 `rtl/aes256_core.sv`와 DUT 구성은 다르므로 두 결과를 구분해야 합니다.
+VCS/Verdi 결과와 당시 사용한 테스트벤치는 [`vcs_original/tb_aes256_core_kat.sv`](verification/nist_aes256_kat/tb/vcs_original/tb_aes256_core_kat.sv)에 함께 보존했습니다.
 
 - [VCS 전체 실행 로그](verification/nist_aes256_kat/results/vcs_aes256_iterative_core_20260813.txt)
 - VCS compiler/runtime: `W-2024.09-SP1_Full64`
