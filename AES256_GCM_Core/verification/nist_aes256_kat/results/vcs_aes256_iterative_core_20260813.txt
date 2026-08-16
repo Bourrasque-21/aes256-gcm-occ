@@ -1,0 +1,31 @@
+Command: /home/hedu33/AH18/uvm_verification/./simv +VECDIR=./kat_vectors -l logs/aes256_kat_20260813_154102.log
+Chronologic VCS simulator copyright 1991-2024
+Contains Synopsys proprietary information.
+Compiler version W-2024.09-SP1_Full64; Runtime version W-2024.09-SP1_Full64;  Aug 13 15:41 2026
+*Verdi* Loading libsscore_vcs202409.so
+FSDB Dumper for VCS, Release Verdi_W-2024.09-SP2, Linux x86_64/64bit, 03/03/2025
+(C) 1996 - 2025 by Synopsys, Inc.
+*Verdi* : Create FSDB file 'aes_core_kat.fsdb'
+*Verdi* : Begin traversing the scope (tb_aes256_core_kat), layer (0).
+*Verdi* : End of traversing.
+========================================================
+ AES-256 ECB Known Answer Test (NIST AESAVS)
+ DUT        : aes256_iterative_core
+ Vector dir : ./kat_vectors
+========================================================
+  ECBGFSbox256.rsp   vectors=5  fail=0          PASS
+  ECBKeySbox256.rsp  vectors=16  fail=0          PASS
+  ECBVarKey256.rsp   vectors=256  fail=0          PASS
+  ECBVarTxt256.rsp   vectors=128  fail=0          PASS
+--------------------------------------------------------
+ TOTAL      : 405 vectors, 0 fail
+ key expand : 274 times
+--------------------------------------------------------
+ RESULT     : PASS - all 405 NIST AESAVS vectors matched
+========================================================
+$finish called from file "./tb/tb_aes256_core_kat.sv", line 254.
+$finish at simulation time            141640000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 141640000 ps
+CPU Time:      0.220 seconds;       Data structure size:   0.0Mb
+Thu Aug 13 15:41:03 2026

@@ -1,0 +1,31 @@
+
+****** xsim v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 19:35:11 GMT 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Mon Aug 17 00:42:22 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source xsim.dir/aes_core_kat_sim/xsim_script.tcl
+# xsim {aes_core_kat_sim} -autoloadwcfg -runall
+Time resolution is 1 ps
+run -all
+========================================================
+ AES-256 ECB Known Answer Test (NIST AESAVS)
+ DUT        : rtl/aes256_core.sv
+ Vector dir : .
+========================================================
+    ECBGFSbox256.rsp vectors=5  fail=0          PASS
+   ECBKeySbox256.rsp vectors=16  fail=0          PASS
+    ECBVarKey256.rsp vectors=256  fail=0          PASS
+    ECBVarTxt256.rsp vectors=128  fail=0          PASS
+--------------------------------------------------------
+ TOTAL      : 405 vectors, 0 fail
+ key expand : 274 times
+--------------------------------------------------------
+ RESULT     : PASS - all 405 NIST AESAVS vectors matched
+========================================================
+$finish called at time : 107330 ns : File "C:/Users/sciab/Desktop/AES256/GitHub_Upload_AES256_OCC/AES256_GCM_Core/verification/nist_aes256_kat/tb/tb_aes256_core_kat_current.sv" Line 222
+exit
+INFO: [Common 17-206] Exiting xsim at Mon Aug 17 00:42:24 2026...

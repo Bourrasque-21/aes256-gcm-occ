@@ -1,0 +1,33 @@
+# Vivado generated files and directories
+**/.Xil/
+**/*.cache/
+**/*.gen/
+**/*.hw/
+**/*.ip_user_files/
+**/*.runs/
+**/*.sim/
+*.jou
+*.log
+*.wdb
+*.dcp
+*.pb
+*.str
+
+# Python
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Office temporary files
+~$*.docx
+~$*.xlsx
+~$*.pptx
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
