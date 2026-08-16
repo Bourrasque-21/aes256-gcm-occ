@@ -58,17 +58,6 @@ Rolling_Shutter_OCC/
     └── rolling_shutter_occ_demo.gif
 ```
 
-## Vivado 구성
-
-태그와 리더는 별도 Vivado 프로젝트로 구성합니다.
-
-| 프로젝트 | RTL 소스 | Top | XDC |
-|---|---|---|---|
-| Tag TX | `common/rtl/`, `tx_board/rtl/` | `top_tag_tx` | `Basys3_TAG_TX.xdc` |
-| Reader RX | `common/rtl/`, `rx_board/rtl/` | `top_reader_rx` | `Basys3_READER_RX.xdc` |
-
-컴파일할 때 `occ_pkg.sv`를 이를 import하는 모듈보다 먼저 배치합니다. 리더 프로젝트에서는 `ov7670_pkg.sv`도 OV7670 관련 모듈보다 먼저 배치합니다.
-
 ## 보드 설정
 
 ### Tag TX
@@ -126,15 +115,6 @@ half_bit_clks = {sw_trim, 7'b0} + 16'd128;
 예를 들어 리더 FND가 `61FF`, 즉 25,087 clocks를 표시하면 태그 `SW11:SW4`를 195로 설정합니다. 태그에서 `BTNU`를 누르면 FND에 설정값 25,088 clocks가 표시되며, 두 값의 1-clock 차이는 약 0.004%입니다. 이 값으로 TX를 설정한 뒤 리더의 sync 및 CRC 검출을 확인합니다.
 
 ## 검증 결과
-
-### 합성 및 타이밍
-
-| 설계 | LUT | BRAM | WNS |
-|---|---:|---:|---:|
-| Tag TX | 127 (0.6%) | 0 | +4.56 ns |
-| Reader RX | 4,679 (22.5%) | 12 (24%) | +3.53 ns |
-
-두 설계 모두 지정된 timing constraint를 만족한 결과입니다.
 
 ### 하드웨어 동작 확인
 

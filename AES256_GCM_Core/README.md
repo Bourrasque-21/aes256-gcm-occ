@@ -114,29 +114,9 @@ VCS/Verdi 결과는 [`vcs_original/tb_aes256_core_kat.sv`](verification/nist_aes
 
 ![VCS/Verdi AES-256 파형](verification/nist_aes256_kat/results/vcs_verdi_waveform_20260813.png)
 
-### KAT 실행
+### KAT 판정 기준
 
-Vivado xsim 2025.x:
-
-```powershell
-cd verification\nist_aes256_kat
-.\sim\run_aes_core_kat.ps1
-```
-
-Vivado 설치 위치를 찾지 못할 때:
-
-```powershell
-.\sim\run_aes_core_kat.ps1 -VivadoBin "C:\Xilinx\Vivado\2025.2\bin"
-```
-
-Synopsys VCS에서 현재 `filelist.f`의 코어와 TB 실행:
-
-```bash
-cd verification/nist_aes256_kat
-make sim
-```
-
-전체 검증의 합격 조건은 정확히 405개 벡터 실행과 불일치 0개입니다. 실행 스크립트와 Makefile은 시뮬레이터 종료 코드뿐 아니라 다음 최종 판정문도 확인합니다.
+전체 검증의 합격 조건은 정확히 405개 벡터와 불일치 0개입니다. 보존된 결과 로그의 최종 판정은 다음과 같습니다.
 
 ```text
 TOTAL      : 405 vectors, 0 fail
@@ -161,8 +141,6 @@ RESULT     : PASS - all 405 NIST AESAVS vectors matched
 ```text
 [TB][PASS] AES-256-GCM line test passed
 ```
-
-SystemVerilog 소스는 `aes_pkg.sv`, AES 하위 모듈, `aes256_core.sv`, GF128/GHASH, TX/RX wrapper, `aes256_gcm_top.sv`, 테스트벤치 순서로 컴파일합니다.
 
 ## 트러블슈팅
 
