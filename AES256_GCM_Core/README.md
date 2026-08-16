@@ -192,14 +192,6 @@ SystemVerilog 소스는 `aes_pkg.sv`, AES 하위 모듈, `aes256_core.sv`, GF128
 
 저장된 Frame/Packet Counter만으로 비교하면 reset 직후의 초기값과 실제 이력 값을 구분하기 어려워 첫 번째 counter 0 패킷이 실행 시점에 따라 다르게 판정될 수 있었습니다. 현재는 `history_valid`가 설정된 뒤에만 replay 및 packet-loss 비교를 수행하고, 인증을 통과한 패킷에서 이력과 valid를 함께 갱신합니다.
 
-### 150 MHz 구현 과정의 I/O 및 타이밍 문제
-
-이 항목의 수치는 현재 폴더와 공통 AES/GHASH 블록을 사용하는 후속 `aes256_gcm_tx_top`의 NR02_01 OOC 구현 기록입니다. 현재 폴더의 `aes256_gcm_top` 자체 post-route 결과와 혼동해서는 안 됩니다.
-
-AES-GCM TX를 일반 보드 top처럼 구현했을 때 367개 I/O가 Zynq-7020의 사용자 I/O 255개를 초과해 `Place 30-415`가 발생했습니다. 이 블록은 외부 핀용 top이 아니라 AXI 내부 IP이므로 `synth_design -mode out_of_context`로 합성해 I/O placement 문제를 해결했습니다.
-
-150 MHz, 6.667 ns 제약의 post-route 결과는 Implementation 완료 후에도 WNS -0.130 ns, TNS -0.886 ns로 timing closure에 실패했습니다. 최장 경로는 AES 라운드가 아니라 `gf128_mult_8bit_seq`의 `byte_index_reg[1]`에서 `z_reg[99]`로 이어지는 GHASH 경로였으며, 6.632 ns data-path delay 중 5.266 ns가 routing delay였습니다. 따라서 기능 시뮬레이션 통과나 Implementation 완료를 150 MHz 동작 보장으로 해석하지 않고 WNS/TNS를 별도로 확인해야 합니다.
-
 ## 설계 문서
 
 - [AES Summary](../_docs/AES_GCM/AES_Summary.pdf)
