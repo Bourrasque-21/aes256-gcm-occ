@@ -9,4 +9,4 @@
 | [AES Summary](_docs/AES_GCM/AES_Summary.pdf) · [GCM Mode](_docs/AES_GCM/GCM_Mode.pdf) · [GCM Summary](_docs/AES_GCM/GCM_Summary.pdf) | AES 및 GCM 설계 요약 PDF |
 | [Rolling-Shutter OCC v3 기술보고서](_docs/OCC/OCC_롤링셔터_v3_기술보고서.pdf) | Rolling-Shutter OCC v3 기술보고서 PDF |
 
-상세한 설계 구조, 검증 결과와 핵심 트러블슈팅은 각 설계 폴더의 README에 정리되어 있습니다.
+상세한 설계 구조, 검증 결과와 트러블슈팅은 각 설계 폴더의 README에 정리되어 있습니다.

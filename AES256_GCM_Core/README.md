@@ -164,7 +164,7 @@ RESULT     : PASS - all 405 NIST AESAVS vectors matched
 
 SystemVerilog 소스는 `aes_pkg.sv`, AES 하위 모듈, `aes256_core.sv`, GF128/GHASH, TX/RX wrapper, `aes256_gcm_top.sv`, 테스트벤치 순서로 컴파일합니다.
 
-## 핵심 트러블슈팅
+## 트러블슈팅
 
 ### RX 초기화 완료 펄스 불일치
 

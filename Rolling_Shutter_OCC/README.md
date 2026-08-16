@@ -159,7 +159,7 @@ DENY A1B2
 | `LD7` | SCCB ninth-bit 상태 |
 | `LD8` | 복조 오류 |
 
-## 핵심 트러블슈팅
+## 트러블슈팅
 
 핵심 문제는 계산된 행 주기를 TX 기준값으로 고정한 것이었습니다. contrast가 확보되는데도 `LD2` sync가 검출되지 않으면 광량보다 먼저 리더 FND의 실측 `half_bit_target`과 태그 FND의 `half_bit_clks`가 일치하는지 확인합니다.
 
