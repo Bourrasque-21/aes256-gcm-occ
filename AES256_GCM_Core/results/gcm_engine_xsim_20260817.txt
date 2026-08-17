@@ -1,0 +1,16 @@
+Vivado Simulator v2025.2
+Run date: 2026-08-17
+
+[TB] TX reference-vector check
+[TB] RX valid-TAG check
+[TB] RX corrupted-TAG rejection check
+[TB][PASS] GCM TX/RX core engine test
+
+Checks:
+- 4 ciphertext blocks matched the independent reference values
+- 128-bit authentication tag matched the independent reference value
+- RX recovered all plaintext blocks
+- valid tag produced auth_ok=1
+- one-bit tag corruption produced auth_ok=0
+- authenticated packet buffer released only the valid-tag plaintext
+- corrupted-tag plaintext did not escape the quarantine buffer

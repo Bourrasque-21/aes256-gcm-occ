@@ -13,6 +13,7 @@ module aes256_core (
     typedef enum logic [2:0] {
         S_IDLE,
         S_KEY_EXPAND,
+        S_KEY_STORE,
         S_INIT,
         S_ROUND,
         S_FINAL,
@@ -32,6 +33,7 @@ module aes256_core (
     logic [3:0]    expand_step;
     logic [1919:0] round_keys;
     logic [127:0]  current_round_key;
+    logic [127:0]  round_key_reg;
     logic [127:0]  round_out;
     logic          final_round;
     
@@ -39,6 +41,7 @@ module aes256_core (
     logic [31:0]   w_minus_8 [0:3];
     logic [31:0]   w_minus_4 [0:3];
     logic [31:0]   exp_out   [0:3];
+    logic [31:0]   exp_out_reg [0:3];
     logic [31:0]   exp_tmp;
     logic [31:0]   w_minus_1;
     logic [3:0]    rcon_idx;
@@ -103,10 +106,14 @@ module aes256_core (
         endcase
     endfunction
 
-    assign busy = (state != S_IDLE) && (state != S_DONE);
+    // Keep busy asserted through S_DONE. A new request is accepted only after
+    // the core returns to S_IDLE.
+    assign busy = (state != S_IDLE);
     assign done = (state == S_DONE);
     assign final_round = (state == S_FINAL);
-    assign current_round_key = final_round ? round_key_at(round_keys, 4'd14) : round_key_at(round_keys, round_ctr);
+    // Prefetch the next round key so the AES round datapath does not contain a
+    // 15:1, 128-bit variable round-key mux.
+    assign current_round_key = round_key_reg;
 
     assign w_minus_1 = w_minus_4[3];
     assign rcon_idx  = (expand_step[3:1] + 4'd1); // step 1,2->rcon(1); step 3,4->rcon(2); etc.
@@ -136,10 +143,12 @@ module aes256_core (
             round_ctr   <= 4'h0;
             expand_step <= 4'h0;
             round_keys  <= 1920'h0;
+            round_key_reg <= 128'h0;
             ciphertext  <= 128'h0;
             for (int i = 0; i < 4; i++) begin
                 w_minus_8[i] <= 32'h0;
                 w_minus_4[i] <= 32'h0;
+                exp_out_reg[i] <= 32'h0;
             end
         end else begin
             unique case (state)
@@ -149,7 +158,8 @@ module aes256_core (
                         round_ctr <= 4'h0;
 
                         if (round_keys_valid && (key == key_reg)) begin
-                            // Same session key: skip the 13-cycle expansion.
+                            // Same session key: skip the pipelined 26-cycle
+                            // expansion.
                             state <= S_INIT;
                         end else begin
                             // First use or a new key: rebuild the complete
@@ -176,31 +186,59 @@ module aes256_core (
                 end
 
                 S_KEY_EXPAND: begin
-                    round_keys[1919 - ((expand_step + 4'd1) * 128) -: 128] <= {
-                        exp_out[0], exp_out[1], exp_out[2], exp_out[3]
-                    };
+                    // Pipeline the SubWord/XOR result before selecting the
+                    // destination round-key register bank.
+                    exp_out_reg[0] <= exp_out[0];
+                    exp_out_reg[1] <= exp_out[1];
+                    exp_out_reg[2] <= exp_out[2];
+                    exp_out_reg[3] <= exp_out[3];
+                    state <= S_KEY_STORE;
+                end
+
+                S_KEY_STORE: begin
+                    // Fixed destinations avoid a variable part-select decoder
+                    // on the round-key register enables.
+                    unique case (expand_step)
+                        4'd1:  round_keys[1663:1536] <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd2:  round_keys[1535:1408] <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd3:  round_keys[1407:1280] <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd4:  round_keys[1279:1152] <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd5:  round_keys[1151:1024] <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd6:  round_keys[1023:896]  <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd7:  round_keys[895:768]   <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd8:  round_keys[767:640]   <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd9:  round_keys[639:512]   <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd10: round_keys[511:384]   <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd11: round_keys[383:256]   <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd12: round_keys[255:128]   <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        4'd13: round_keys[127:0]     <= {exp_out_reg[0], exp_out_reg[1], exp_out_reg[2], exp_out_reg[3]};
+                        default: begin
+                        end
+                    endcase
                     
                     w_minus_8[0] <= w_minus_4[0];
                     w_minus_8[1] <= w_minus_4[1];
                     w_minus_8[2] <= w_minus_4[2];
                     w_minus_8[3] <= w_minus_4[3];
                     
-                    w_minus_4[0] <= exp_out[0];
-                    w_minus_4[1] <= exp_out[1];
-                    w_minus_4[2] <= exp_out[2];
-                    w_minus_4[3] <= exp_out[3];
+                    w_minus_4[0] <= exp_out_reg[0];
+                    w_minus_4[1] <= exp_out_reg[1];
+                    w_minus_4[2] <= exp_out_reg[2];
+                    w_minus_4[3] <= exp_out_reg[3];
 
                     if (expand_step == 4'd13) begin
                         round_keys_valid <= 1'b1;
                         state            <= S_INIT;
                     end else begin
                         expand_step <= expand_step + 4'd1;
+                        state       <= S_KEY_EXPAND;
                     end
                 end
 
                 S_INIT: begin
                     state_reg <= block_reg ^ round_key_at(round_keys, 4'd0);
                     round_ctr <= 4'd1;
+                    round_key_reg <= round_key_at(round_keys, 4'd1);
                     state     <= S_ROUND;
                 end
 
@@ -208,9 +246,14 @@ module aes256_core (
                     state_reg <= round_out;
                     if (round_ctr == 4'd13) begin
                         round_ctr <= 4'd14;
+                        round_key_reg <= round_key_at(round_keys, 4'd14);
                         state     <= S_FINAL;
                     end else begin
                         round_ctr <= round_ctr + 4'd1;
+                        round_key_reg <= round_key_at(
+                            round_keys,
+                            round_ctr + 4'd1
+                        );
                     end
                 end
 

@@ -25,7 +25,9 @@ module ghash_engine_seq (
 
     assign mult_x = y_in ^ data_in;
     assign mult_start = (state == H_IDLE) && start;
-    assign busy = (state == H_WAIT_MULT);
+    // H_DONE still belongs to the active transaction because done is asserted
+    // in that state. A new request is accepted only after returning to H_IDLE.
+    assign busy = (state != H_IDLE);
     assign done = (state == H_DONE);
 
     gf128_mult_8bit_seq u_gf128_mult_8bit_seq (
