@@ -30,7 +30,9 @@ module gf128_mult_8bit_seq (
     assign busy = (state == M_RUN);
     assign done = (state == M_DONE);
 
-    assign x_byte    = x_reg[127 - (byte_index * 8) -: 8];
+    // Always consume the most-significant byte. Shifting x_reg after each
+    // step avoids a byte_index-controlled 16:1 mux on the GHASH critical path.
+    assign x_byte     = x_reg[127:120];
     assign step8_next = gf128_step8(z_reg, v_reg, x_byte);
     assign z_next     = step8_next[255:128];
     assign v_next     = step8_next[127:0];
@@ -84,6 +86,7 @@ module gf128_mult_8bit_seq (
                 end
 
                 M_RUN: begin
+                    x_reg <= {x_reg[119:0], 8'h00};
                     z_reg <= z_next;
                     v_reg <= v_next;
 
