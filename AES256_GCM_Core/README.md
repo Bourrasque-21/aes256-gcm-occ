@@ -224,18 +224,15 @@ TX와 RX는 `E_PARALLEL_START`에서 `aes_start`와 `ghash_start`를 함께 발�
 
 기능 오류 수정과 구분되는 RTL 구조 개선은 다음과 같습니다.
 
-| 개선 대상 | 기존 구조 | 변경 구조 |
-|---|---|---|
-| GF(2^128) 입력 선택 | `byte_index`로 16개 바이트 중 하나를 가변 선택 | `x_reg[127:120]`만 처리하고 매 클럭 8비트 shift |
-| 동일 key 연산 | AES 요청마다 라운드 키 확장, GCM message마다 H 계산 | `round_keys`/`key_reg`와 `h_reg`/`h_key_reg`를 저장하고 동일 key에서 재사용 |
-| 키 확장 및 라운드 키 경로 | 키 확장 결과 생성과 저장 위치 선택을 한 경로에서 처리, 라운드 입력에서 15:1 키 선택 | 확장을 capture/store 상태로 분리하고 다음 키를 `round_key_reg`에 선등록 |
-| Payload 경계 제어 | 32비트 block counter의 add/compare 결과를 제어에 직접 사용 | TX/RX 경계 판정을 1비트 register에 미리 저장 |
+| 개선 대상 | 기존 구조의 문제 | 적용한 구조 | 결과 및 확인 |
+|---|---|---|---|
+| GF(2^128) 입력 선택 | `byte_index`가 128비트 입력의 16개 바이트 중 하나를 가변 선택하므로 16:1 바이트 MUX가 구성됨 | 처리 입력을 `x_reg[127:120]`으로 고정하고 매 클럭 `x_reg`를 8비트 shift함 | 가변 선택기를 제거함. 8비트씩 16회 처리하는 순서와 GF 연산 결과를 유지함 |
+| 동일 key 연산 | AES 요청마다 라운드 키를 확장하고 GCM message마다 `H=AES_K(0^128)`를 다시 계산함 | `round_keys_valid && key == key_reg`이면 키 확장 상태를 건너뜀. `h_valid && cmd_key == h_key_reg`이면 H 계산 상태를 건너뜀 | 동일 key의 후속 블록은 저장된 라운드 키를 사용하고, 후속 message는 저장된 `h_reg`를 사용함 |
+| 키 확장 및 라운드 키 경로 | SubWord/XOR 결과 생성과 저장 위치 선택이 한 조합 경로에 포함되고, AES round 입력에 15:1의 128비트 키 선택기가 포함됨 | 13개 키 확장 step을 `S_KEY_EXPAND`의 capture와 `S_KEY_STORE`의 고정 위치 저장으로 분리함. 다음 라운드 키를 `round_key_reg`에 선등록함 | AES round datapath가 고정된 register 출력을 사용함. AES-256 KAT 405개가 모두 일치함 |
+| Payload 경계 제어 | 32비트 block counter의 add/compare 결과가 AES 시작 여부와 마지막 블록 출력 제어에 직접 연결됨 | TX의 `next_block_exists_reg`와 RX의 `current_block_last_reg`에 경계 판정을 한 상태 앞에서 저장함 | AES 시작 여부와 마지막 블록 출력을 등록된 1비트 신호로 제어함. GCM TX/RX 통합 테스트를 통과함 |
 
-GF 곱셈은 기존과 동일하게 8비트씩 16회 처리합니다. 새 key의 13개 확장 step은
-`S_KEY_EXPAND`와 `S_KEY_STORE` 두 상태로 처리하며, 동일 key에서는 키 확장과 H
-계산 상태를 건너뜁니다. 구조 변경 후 AES-256 KAT 405개와 GCM TX/RX 통합 테스트로
-기능 결과가 유지됨을 확인했습니다. 합성 결과를 보존하지 않았으므로 timing 개선
-수치는 기재하지 않습니다.
+위 표의 결과는 RTL 구조와 기능 검증으로 확인한 내용입니다. 합성 timing 결과를
+보존하지 않았으므로 최대 동작 주파수나 개선 비율은 기재하지 않습니다.
 
 ## 검증 항목 및 결과
 
@@ -309,19 +306,29 @@ VCS/Verdi로 수행했던 기존 AES-256 KAT 테스트벤치와 결과 화면도
 
 `통합 시뮬레이션 timeout` → `RX의 E_INIT_WAIT 정지 확인` → `완료 상태 register 추가` → `GCM 통합 테스트 PASS`
 
-초기 RX는 `aes_done && ghash_done` 조건으로 상태를 전이했으나 두 신호가 서로
-다른 클럭에 1클럭 펄스로 발생했습니다. `aes_complete_reg`와
-`ghash_complete_reg`에 각 완료 시점을 저장하고, 두 완료가 모두 확인된 경우에만
-다음 상태로 이동하도록 변경했습니다.
+- **원인:** 초기 RX는 `aes_done && ghash_done` 조건으로 상태를 전이했으나 두
+  신호가 서로 다른 클럭에 1클럭 펄스로 발생함.
+
+- **구현:** `aes_complete_reg`와 `ghash_complete_reg`에 각 완료 시점을 저장하고,
+  `(aes_done || aes_complete_reg) && (ghash_done || ghash_complete_reg)`가 성립할
+  때만 다음 상태로 이동하도록 변경함.
+
+- **검증:** 정상 TAG와 변조 TAG를 차례로 입력하는 GCM 통합 테스트가 timeout 없이
+  완료되고 PASS를 출력함.
 
 ### 인증 전 평문 격리
 
 `plaintext_valid 선행 확인` → `미인증 평문 노출 가능` → `packet buffer 추가` → `변조 packet 출력 0블록`
 
-AES-CTR 복호화는 TAG 입력 전에 완료되므로 `gcm_rx_engine`의 평문 출력은 인증 전
-데이터입니다. `authenticated_packet_buffer`가 한 packet을 저장하고
-`auth_valid && auth_ok`인 경우에만 출력하도록 변경했습니다. 테스트벤치에서 정상
-TAG packet은 4블록이 출력되고, TAG 1비트 변조 packet은 0블록이 출력됨을 확인했습니다.
+- **원인:** AES-CTR 복호화는 TAG 입력 없이 수행되므로 `gcm_rx_engine`의
+  `plaintext_valid`가 최종 `auth_valid`보다 먼저 발생함. 해당 평문은 인증 전 데이터임.
+
+- **구현:** `authenticated_packet_buffer`가 `B_WRITE`에서 한 packet을 저장하고
+  `B_WAIT_AUTH`에서 인증 결과를 기다리도록 구성함. `auth_ok=1`일 때만 `B_READ`로
+  이동하며, `auth_ok=0`이면 출력 없이 `B_IDLE`로 복귀함.
+
+- **검증:** 정상 TAG packet은 buffer에서 4블록이 출력됨. TAG 최하위 1비트를
+  변조한 packet은 raw plaintext가 생성되지만 buffer 출력은 0블록임을 확인함.
 
 ## 개념 정리 문서
 
