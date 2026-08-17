@@ -4,8 +4,8 @@
 
 | 폴더 | 내용 |
 |---|---|
-| [AES-256-GCM Core 설계](AES256_GCM_Core/README.md) | 플랫폼·AXI 계층과 분리된 AES-256-GCM TX/RX 연산 엔진, 코어 테스트벤치, NIST AES-256 KAT 검증 |
-| [Rolling-Shutter OCC v3 설계](Rolling_Shutter_OCC/README.md) | Basys3 두 대와 OV7670을 사용하는 Rolling-Shutter OCC v3 송수신 RTL 및 수신 도구 |
+| [AES-256-GCM Core 설계](AES256_GCM_Core/) | 플랫폼·AXI 계층과 분리된 AES-256-GCM TX/RX 연산 엔진, 코어 테스트벤치, NIST AES-256 KAT 검증 |
+| [Rolling-Shutter OCC v3 설계](Rolling_Shutter_OCC/) | Basys3 두 대와 OV7670을 사용하는 Rolling-Shutter OCC v3 송수신 RTL 및 수신 도구 |
 | [AES Summary](_docs/AES_GCM/AES_Summary.pdf) · [GCM Mode](_docs/AES_GCM/GCM_Mode.pdf) · [GCM Summary](_docs/AES_GCM/GCM_Summary.pdf) | AES 및 GCM 설계 요약 PDF |
 | [Rolling-Shutter OCC v3 기술보고서](_docs/OCC/OCC_롤링셔터_v3_기술보고서.pdf) | Rolling-Shutter OCC v3 기술보고서 PDF |
 
