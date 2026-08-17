@@ -272,28 +272,26 @@ input/output delay와 실제 pin 배치는 포함하지 않습니다.
 
 ### 기존 코어 대비 비교
 
-NR03, NR04와 현재 코어를 모두 위와 동일한 고정 key, 80블록, 엔진 단독
-OOC 조건으로 다시 구현해 비교했습니다. 기존 프로젝트의 V4L2/AXI wrapper와
-과거 report 수치는 사용하지 않았습니다.
+NR03와 현재 코어(NR04)를 위와 동일한 고정 key, 80블록, 엔진 단독 OOC
+조건으로 다시 구현해 비교했습니다. 기존 프로젝트의 V4L2/AXI wrapper와 과거
+report 수치는 사용하지 않았습니다.
 
 | Version | TX routed WNS | RX routed WNS | TX/RX routed TNS | 150 MHz 결과 |
 |---|---:|---:|---:|---|
 | NR03 | +0.306 ns | +0.229 ns | 0.000 ns | PASS |
-| NR04 | +0.426 ns | +0.547 ns | 0.000 ns | PASS |
-| 현재 코어 | +0.426 ns | +0.547 ns | 0.000 ns | PASS |
+| 현재 코어 (NR04) | +0.426 ns | +0.547 ns | 0.000 ns | PASS |
 
 | Version | TX Slice LUT | TX register | RX Slice LUT | RX register |
 |---|---:|---:|---:|---:|
 | NR03 | 3,413 | 4,073 | 3,335 | 4,204 |
-| NR04 | 3,519 | 4,330 | 3,428 | 4,460 |
-| 현재 코어 | 3,519 | 4,330 | 3,428 | 4,460 |
+| 현재 코어 (NR04) | 3,519 | 4,330 | 3,428 | 4,460 |
 
 NR03 대비 현재 코어의 routed WNS는 TX `+0.120 ns`, RX `+0.318 ns`
 증가했습니다. 자원은 TX에서 LUT 106개와 register 257개, RX에서 LUT 93개와
 register 256개 증가했습니다. 이는 키 확장 경로 분리, round-key 선등록 및
 payload 경계 판정 등록에 추가 register와 제어 논리를 사용하는 구조에
-해당합니다. NR04와 현재 코어는 이 조건에서 timing과 자원량이 동일하므로,
-현재 코어는 NR04의 150 MHz 개선 구조를 유지합니다.
+해당합니다. 현재 GitHub RTL은 NR04와 합성 netlist, timing 및 자원량이
+동일하므로 별도 코어 버전으로 구분하지 않습니다.
 
 ## 검증 항목 및 결과
 
