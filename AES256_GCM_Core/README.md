@@ -214,34 +214,70 @@ Ciphertext C_i --+-- AES-CTR -> Plaintext P_i
                  +-- GHASH   -> authentication state
 ```
 
-AES round datapath는 14라운드, GF 곱셈기의 `M_RUN` 구간은 16클럭입니다. 두
-연산을 중첩하므로 순차 실행 시 약 30클럭이던 산술 구간은 더 긴 GHASH 연산이
-지배합니다. 실제 블록 간격에는 입출력 handshake와 FSM 전이 클럭이 추가됩니다.
+TX와 RX는 `E_PARALLEL_START`에서 `aes_start`와 `ghash_start`를 함께 발생시킵니다.
+`E_PARALLEL_WAIT`에서는 각 `done`을 별도 register에 저장하고 두 연산의 완료가
+모두 확인된 경우에만 다음 상태로 이동합니다. GF 곱셈기의 `M_RUN` 상태는 정확히
+16클럭 동안 실행됩니다. 전체 블록 지연은 입출력 handshake와 FSM 전이까지 포함하므로
+이 문서에서는 별도의 측정값 없이 총 지연을 특정하지 않습니다.
 
-## 연산 경로 개선
+## 설계 개선
+
+아래 항목은 기능 오류를 수정한 트러블슈팅이 아니라, 반복 연산과 조합 경로를
+줄이기 위해 RTL 구조를 변경한 내용입니다.
 
 ### GF(2^128) 입력 시프트 구조
 
-기존 곱셈기는 `byte_index`로 128비트 입력의 현재 바이트를 가변 선택해 합성 시
-16:1 바이트 MUX가 생성됐습니다. 현재 구조는 항상 `x_reg[127:120]`만 처리하고
-매 클럭 `x_reg`를 8비트 이동합니다.
+**기존 구조:** `byte_index`로 128비트 입력에서 처리할 바이트를 가변 선택함.
 
-- 8비트/클럭, 총 16클럭 유지
-- GF(2^128) 연산 결과 및 외부 인터페이스 유지
-- GHASH critical path의 가변 바이트 선택기 제거
+**개선 이유:** 가변 선택식이 16개의 8비트 입력을 선택하는 조합 MUX로 구성됨.
 
-### AES 키 스케줄과 라운드 키 경로
+**변경:** 처리 바이트를 `x_reg[127:120]`으로 고정하고, 매 클럭 `x_reg`를
+8비트 왼쪽으로 이동하도록 변경함.
 
-- 동일 key의 전체 AES-256 라운드 키를 cache하여 다음 블록에서 재사용
-- 새 key의 key expansion을 capture/store 두 단계로 분리
-- 다음 round key를 register에 미리 저장해 AES round datapath의 15:1,
-  128비트 MUX 제거
-- 초기 key expansion 지연은 증가하지만 동일 key를 사용하는 정상 GCM payload의
-  블록 처리 간격에는 영향을 주지 않음
+**결과:** 가변 바이트 선택기를 제거함. 8비트씩 16회 처리하는 연산 순서와
+GF(2^128) 결과는 유지함.
 
-TX의 다음 블록 존재 여부와 RX의 마지막 블록 여부도 한 상태 앞에서 1비트로
-등록하여 32비트 add/compare 결과가 AES enable 및 출력 제어 경로를 직접 구동하지
-않도록 구성했습니다.
+### 동일 key의 라운드 키와 H 재사용
+
+**기존 구조:** AES 블록 연산을 시작할 때마다 AES-256 라운드 키를 다시 확장함.
+GCM의 hash subkey `H=AES_K(0^128)`도 message마다 다시 계산함.
+
+**개선 이유:** 같은 session key를 사용하는 연속 블록과 message에서 동일한 값을
+반복 계산함.
+
+**변경:** `aes256_core`가 전체 라운드 키와 `key_reg`를 저장함.
+`round_keys_valid && key == key_reg`이면 키 확장 상태를 건너뜀. TX/RX 엔진도
+`h_valid && cmd_key == h_key_reg`이면 H 계산 상태를 건너뜀.
+
+**결과:** 동일 key의 후속 AES 요청은 저장된 라운드 키를 사용함. 동일 key의 후속
+GCM message는 저장된 H를 사용함.
+
+### 키 확장과 라운드 키 선택 경로
+
+**기존 구조:** 키 확장 결과 생성과 라운드 키 저장을 한 경로에서 처리하고,
+라운드 번호로 15개의 128비트 라운드 키 중 하나를 조합 선택함.
+
+**개선 이유:** 키 확장 결과의 생성과 저장 위치 선택이 같은 클럭의 조합 경로에
+포함됨. 라운드 입력에는 15:1, 128비트 키 선택기가 포함됨.
+
+**변경:** 키 확장을 `S_KEY_EXPAND`의 결과 capture와 `S_KEY_STORE`의 고정 위치
+저장으로 분리함. 다음 라운드 키는 한 상태 앞에서 `round_key_reg`에 저장함.
+
+**결과:** AES round datapath는 `round_key_reg`의 고정 출력을 사용함. 새 key의
+13개 확장 step은 capture/store 두 상태로 처리함. AES-256 KAT 405개로 변경 후
+암호화 결과가 동일함을 확인함.
+
+### Payload 경계 제어 등록
+
+**기존 구조:** 32비트 block counter의 add/compare 결과가 AES 시작 여부와 마지막
+블록 출력 제어에 직접 연결됨.
+
+**개선 이유:** 32비트 연산 결과가 제어 신호의 조합 경로에 포함됨.
+
+**변경:** TX는 `next_block_exists_reg`, RX는 `current_block_last_reg`에 경계 판정을
+한 상태 앞에서 저장함.
+
+**결과:** AES 시작 여부와 마지막 블록 출력은 등록된 1비트 신호로 결정함.
 
 ## 검증 항목 및 결과
 
@@ -313,38 +349,42 @@ VCS/Verdi로 수행했던 기존 AES-256 KAT 테스트벤치와 결과 화면도
 
 ### AES와 GHASH 완료 펄스 불일치
 
-AES와 GHASH를 동시에 시작해도 연산 지연이 서로 다르고 `done`은 각각 1클럭
-펄스이므로 `aes_done && ghash_done`만 기다리면 상태 전이가 멈출 수 있습니다.
-현재 TX/RX 엔진은 `aes_complete_reg`와 `ghash_complete_reg`에 각 완료 시점을
-독립적으로 저장하고, 두 연산이 모두 끝난 뒤 다음 상태로 진행합니다.
+**문제:** 초기 RX 구조가 `E_INIT_WAIT`에서 다음 상태로 진행하지 못해 TX/RX
+loopback 전체가 정지함.
+
+**발견 방법:** TX/RX 통합 시뮬레이션이 timeout으로 종료됨. 파형에서 상태가
+`E_INIT_WAIT`에 머물고, `aes_done`과 `ghash_done`이 서로 다른 클럭에 1클럭씩
+발생함을 확인함.
+
+**원인:** AES와 GHASH의 연산 지연이 다르므로 두 `done` 펄스가 같은 클럭에
+발생하지 않음. 1클럭 펄스를 직접 AND한 조건으로는 두 연산의 완료를 누적할 수 없음.
+
+**해결:** `aes_complete_reg`와 `ghash_complete_reg`를 추가함. 각 `done` 발생을
+독립적으로 저장하고, 두 완료 상태가 모두 확인된 경우에만 다음 상태로 이동하도록
+변경함.
+
+**검증:** GCM TX/RX 통합 테스트가 timeout 없이 완료됨. 정상 TAG 승인과 변조 TAG
+거부까지 수행한 뒤 `[TB][PASS] GCM TX/RX core engine test`가 출력됨.
 
 ### TAG 검증 전 평문 출력
 
-RX는 수신 ciphertext를 GHASH에 누적하는 동안 AES-CTR 복호화도 병렬 수행하므로
-TAG를 받기 전에 `plaintext_valid`가 발생합니다. 이 출력은 미인증 평문입니다.
-현재 `authenticated_packet_buffer`가 한 packet을 격리하고
-`auth_valid && auth_ok`일 때만 외부로 내보내며, 인증 실패 시 저장 내용을
-출력하지 않습니다.
+**문제:** `gcm_rx_engine`의 평문 출력을 downstream에 직접 연결하면 TAG 검증 전
+평문이 외부로 전달됨. 변조된 TAG를 가진 packet의 평문도 검증 전까지는 생성됨.
 
-### 동일 키의 반복 확장 지연
+**발견 방법:** RX 시뮬레이션에서 각 블록의 `plaintext_valid`가 발생한 뒤 마지막에
+`auth_valid`가 발생하는 순서를 확인함. 변조 TAG 테스트에서도 raw plaintext 4블록이
+생성됨을 확인함.
 
-초기 구조는 같은 세션 키를 사용하는 블록마다 AES-256 키 확장을 다시 수행해
-불필요한 지연이 발생했습니다. 현재 `aes256_core.sv`는 전체 라운드 키를 저장하고
-`round_keys_valid && key == key_reg`이면 확장을 건너뜁니다. GCM의 `H` 값도
-키와 함께 cache하여 동일 키의 다음 message에서 재사용합니다.
+**원인:** AES-CTR 복호화는 TAG 입력 없이 수행 가능함. RX가 AES-CTR 복호화와
+ciphertext GHASH를 병렬 실행하므로 plaintext 생성 시점이 TAG 판정 시점보다 빠름.
 
-### GHASH 입력 선택 경로
+**해결:** `authenticated_packet_buffer`를 RX 출력 뒤에 추가함. 한 packet의 평문을
+모두 저장하고 `auth_valid && auth_ok`인 경우에만 `B_READ` 상태로 이동하도록 함.
+`auth_ok=0`이면 `B_IDLE`로 복귀하며 저장된 평문을 출력하지 않음.
 
-초기 8비트 순차 곱셈기는 `byte_index`로 128비트 입력의 현재 바이트를 선택해
-합성 시 16:1 byte MUX가 생성됐습니다. 현재 곱셈기는 항상
-`x_reg[127:120]`을 사용하고 매 클럭 입력 register를 8비트 이동하여, 16클럭
-연산 구조를 유지하면서 가변 선택 경로를 제거했습니다.
-
-### AES 라운드 키 선택 경로
-
-라운드 번호로 15개의 128비트 키 중 하나를 조합 선택하면 AES round datapath에
-큰 MUX가 놓입니다. 현재 구조는 다음 라운드 키를 `round_key_reg`에 미리 저장해
-라운드 연산이 고정된 register 출력만 사용하도록 구성했습니다.
+**검증:** 정상 TAG packet은 buffer에서 4블록이 출력됨. TAG 최하위 1비트를 변조한
+packet은 raw plaintext 4블록이 생성되지만 buffer 출력은 0블록임을 테스트벤치에서
+확인함.
 
 ## 개념 정리 문서
 
