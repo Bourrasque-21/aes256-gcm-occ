@@ -119,7 +119,11 @@ TX의 다음 블록 존재 여부와 RX의 마지막 블록 여부도 한 상태
 등록하여 32비트 add/compare 결과가 AES enable 및 출력 제어 경로를 직접 구동하지
 않도록 구성했습니다.
 
-## 검증
+## 검증 항목 및 결과
+
+최신 standalone 코어는 GCM TX/RX 통합 동작과 AES-256 블록 암호 코어를
+각각 검증합니다. GCM 테스트는 인증 전 평문과 인증 후 출력의 신뢰 경계까지
+검사하며, AES KAT는 NIST AESAVS 벡터 전체를 비교합니다.
 
 ### GCM TX/RX 엔진
 
@@ -127,20 +131,26 @@ TX의 다음 블록 존재 여부와 RX의 마지막 블록 여부도 한 상태
 .\AES256_GCM_Core\sim\run_gcm_engine_test.ps1
 ```
 
-테스트 항목:
+[`tb_gcm_engines.sv`](tb/tb_gcm_engines.sv)의 검증 항목은 다음과 같습니다.
 
-- 독립 기준값과 ciphertext 4블록 비교
-- 128비트 authentication TAG 기준값 비교
-- TX 결과를 RX에 입력한 plaintext round trip
-- 정상 TAG 승인
-- TAG 1비트 변조 시 인증 거부
-- 인증 성공 packet만 quarantine buffer 외부로 출력되는지 확인
+| 구분 | 검증 항목 | 합격 조건 |
+|---|---|---|
+| TX 암호문 | 독립 기준값과 ciphertext 4블록 비교 | 4블록 모두 일치 |
+| TX 인증값 | 128비트 authentication TAG 기준값 비교 | TAG 완전 일치 |
+| RX 복호화 | TX 결과를 RX에 입력해 plaintext round trip 비교 | 원본 4블록 및 `plaintext_last` 일치 |
+| 정상 인증 | 정상 TAG 입력 | `auth_valid=1`, `auth_ok=1` |
+| 변조 탐지 | TAG 최하위 1비트 변조 | `auth_valid=1`, `auth_ok=0` |
+| 평문 격리 | 인증 성공/실패 packet의 quarantine buffer 출력 검사 | 성공 packet만 4블록 출력, 실패 packet은 0블록 출력 |
+| 완료 조건 | 출력 블록 수와 인증 결과 수 검사 | raw 8블록, safe 4블록, pass 1회, fail 1회 |
+| 정지 탐지 | 전체 테스트 timeout | 20,000클럭 이내 완료 |
 
 합격 판정:
 
 ```text
 [TB][PASS] GCM TX/RX core engine test
 ```
+
+Vivado xsim 2025.2에서 위 검증 항목을 모두 통과했습니다.
 
 ### AES-256 NIST KAT
 
@@ -156,25 +166,63 @@ TX의 다음 블록 존재 여부와 RX의 마지막 블록 여부도 한 상태
 | `ECBVarTxt256.rsp` | 128 |
 | 합계 | **405** |
 
-Vivado xsim 2025.2 결과는 **405 pass, 0 fail**입니다. 이 KAT는 AES-256 ECB
-블록 암호 코어를 검증하며 GCM 전체 표준 적합성 시험을 의미하지 않습니다.
+### 검증 결과
+
+| DUT/검증 | 시뮬레이터 | 결과 | 실행일 | 근거 |
+|---|---|---:|---|---|
+| 현재 GCM TX/RX 엔진 통합 검증 | Vivado xsim 2025.2 | **PASS** | 2026-08-17 | [테스트벤치](tb/tb_gcm_engines.sv) · [실행 스크립트](sim/run_gcm_engine_test.ps1) |
+| 현재 `rtl/aes256_core.sv` NIST KAT | Vivado xsim 2025.2 | **405 pass, 0 fail** | 2026-08-17 | [xsim 실행 로그](verification/nist_aes256_kat/results/aes256_core_xsim_20260817.txt) |
+| 기존 iterative AES-256 core NIST KAT | Synopsys VCS W-2024.09-SP1 | **405 pass, 0 fail** | 2026-08-13 | [VCS 실행 로그](verification/nist_aes256_kat/results/vcs_aes256_iterative_core_20260813.txt) |
+
+전체 AES KAT의 합격 조건은 정확히 405개 벡터와 불일치 0개입니다. 이 KAT는
+AES-256 ECB 블록 암호 코어를 검증하며 GCM 전체 표준 적합성 시험을 의미하지
+않습니다.
 
 VCS/Verdi로 수행했던 기존 AES-256 KAT 테스트벤치와 결과 화면도
 `verification/nist_aes256_kat/`에 참고 자료로 보존합니다.
 
-## 상위 계층에서 구현할 항목
+![VCS/Verdi NIST AES-256 KAT 통과 화면](verification/nist_aes256_kat/results/vcs_verdi_kat_pass_20260813.png)
 
-이 폴더에는 다음 기능이 포함되지 않습니다.
+![VCS/Verdi AES-256 파형](verification/nist_aes256_kat/results/vcs_verdi_waveform_20260813.png)
 
-- AXI4-Stream adapter 및 packet framing
-- DMA/BRAM 연결과 byte-order 변환
-- AAD/IV 생성 정책
-- 영상 line/frame 조립 및 오류 복구 정책
+## 트러블슈팅
 
-따라서 실제 시스템에서는 IV 재사용 방지와 packet buffer 이후의 영상·네트워크
-정책을 상위 계층에서 구현해야 합니다.
+### AES와 GHASH 완료 펄스 불일치
 
-## 설계 문서
+AES와 GHASH를 동시에 시작해도 연산 지연이 서로 다르고 `done`은 각각 1클럭
+펄스이므로 `aes_done && ghash_done`만 기다리면 상태 전이가 멈출 수 있습니다.
+현재 TX/RX 엔진은 `aes_complete_reg`와 `ghash_complete_reg`에 각 완료 시점을
+독립적으로 저장하고, 두 연산이 모두 끝난 뒤 다음 상태로 진행합니다.
+
+### TAG 검증 전 평문 출력
+
+RX는 수신 ciphertext를 GHASH에 누적하는 동안 AES-CTR 복호화도 병렬 수행하므로
+TAG를 받기 전에 `plaintext_valid`가 발생합니다. 이 출력은 미인증 평문입니다.
+현재 `authenticated_packet_buffer`가 한 packet을 격리하고
+`auth_valid && auth_ok`일 때만 외부로 내보내며, 인증 실패 시 저장 내용을
+출력하지 않습니다.
+
+### 동일 키의 반복 확장 지연
+
+초기 구조는 같은 세션 키를 사용하는 블록마다 AES-256 키 확장을 다시 수행해
+불필요한 지연이 발생했습니다. 현재 `aes256_core.sv`는 전체 라운드 키를 저장하고
+`round_keys_valid && key == key_reg`이면 확장을 건너뜁니다. GCM의 `H` 값도
+키와 함께 cache하여 동일 키의 다음 message에서 재사용합니다.
+
+### GHASH 입력 선택 경로
+
+초기 8비트 순차 곱셈기는 `byte_index`로 128비트 입력의 현재 바이트를 선택해
+합성 시 16:1 byte MUX가 생성됐습니다. 현재 곱셈기는 항상
+`x_reg[127:120]`을 사용하고 매 클럭 입력 register를 8비트 이동하여, 16클럭
+연산 구조를 유지하면서 가변 선택 경로를 제거했습니다.
+
+### AES 라운드 키 선택 경로
+
+라운드 번호로 15개의 128비트 키 중 하나를 조합 선택하면 AES round datapath에
+큰 MUX가 놓입니다. 현재 구조는 다음 라운드 키를 `round_key_reg`에 미리 저장해
+라운드 연산이 고정된 register 출력만 사용하도록 구성했습니다.
+
+## 개념 정리 문서
 
 - [AES Summary](../_docs/AES_GCM/AES_Summary.pdf)
 - [GCM Mode](../_docs/AES_GCM/GCM_Mode.pdf)
