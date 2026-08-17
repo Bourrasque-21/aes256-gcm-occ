@@ -231,8 +231,69 @@ TX와 RX는 `E_PARALLEL_START`에서 `aes_start`와 `ghash_start`를 함께 발�
 | 키 확장 및 라운드 키 경로 | SubWord/XOR 결과 생성과 저장 위치 선택이 한 조합 경로에 포함되고, AES round 입력에 15:1의 128비트 키 선택기가 포함됨 | 13개 키 확장 step을 `S_KEY_EXPAND`의 capture와 `S_KEY_STORE`의 고정 위치 저장으로 분리함. 다음 라운드 키를 `round_key_reg`에 선등록함 | AES round datapath가 고정된 register 출력을 사용함. AES-256 KAT 405개가 모두 일치함 |
 | Payload 경계 제어 | 32비트 block counter의 add/compare 결과가 AES 시작 여부와 마지막 블록 출력 제어에 직접 연결됨 | TX의 `next_block_exists_reg`와 RX의 `current_block_last_reg`에 경계 판정을 한 상태 앞에서 저장함 | AES 시작 여부와 마지막 블록 출력을 등록된 1비트 신호로 제어함. GCM TX/RX 통합 테스트를 통과함 |
 
-위 표의 결과는 RTL 구조와 기능 검증으로 확인한 내용입니다. 합성 timing 결과를
-보존하지 않았으므로 최대 동작 주파수나 개선 비율은 기재하지 않습니다.
+위 표의 결과는 RTL 구조와 기능 검증으로 확인한 내용입니다.
+
+## 고정 80블록 합성 및 구현 결과
+
+다음 결과는 `cmd_payload_blocks=80`으로 고정하고, `cmd_key`도 합성 시점의
+상수로 연결한 엔진 단독 OOC 기준입니다. IV, AAD, payload data와 handshake
+신호는 동적으로 유지했습니다. 가변 payload 길이 또는 실행 중 교환되는 key를
+상위 입력으로 직접 연결한 조건의 결과가 아닙니다.
+
+| 항목 | 조건 |
+|---|---|
+| Tool | Vivado 2025.2 |
+| Device | `xc7z020clg400-1` |
+| Clock | 6.667 ns (150 MHz) |
+| Clock uncertainty | 0.200 ns |
+| Flow | OOC synthesis, optimization, placement, physical optimization, routing |
+
+### 타이밍
+
+| Engine | Post-synthesis WNS | Routed WNS | Routed TNS | Setup 실패 endpoint | Routed WHS | 결과 |
+|---|---:|---:|---:|---:|---:|---|
+| TX | +0.991 ns | +0.426 ns | 0.000 ns | 0 | +0.004 ns | PASS |
+| RX | +0.877 ns | +0.547 ns | 0.000 ns | 0 | +0.009 ns | PASS |
+
+TX와 RX 모두 고정 80블록 구성의 엔진 내부 register-to-register 경로에서
+150 MHz setup 및 hold 조건을 만족했습니다. 독립 OOC 측정이므로 상위 시스템의
+input/output delay와 실제 pin 배치는 포함하지 않습니다.
+
+### Routed 자원량
+
+| Engine | Slice LUT | Slice register | BRAM | DSP |
+|---|---:|---:|---:|---:|
+| TX | 3,519 | 4,330 | 0 | 0 |
+| RX | 3,428 | 4,460 | 0 | 0 |
+
+위 자원량은 `gcm_tx_engine`과 `gcm_rx_engine`만 각각 구현한 결과입니다.
+`authenticated_packet_buffer`, AXI adapter, DMA 및 영상 처리 플랫폼 자원은
+포함하지 않습니다.
+
+### 기존 코어 대비 비교
+
+NR03, NR04와 현재 코어를 모두 위와 동일한 고정 key, 80블록, 엔진 단독
+OOC 조건으로 다시 구현해 비교했습니다. 기존 프로젝트의 V4L2/AXI wrapper와
+과거 report 수치는 사용하지 않았습니다.
+
+| Version | TX routed WNS | RX routed WNS | TX/RX routed TNS | 150 MHz 결과 |
+|---|---:|---:|---:|---|
+| NR03 | +0.306 ns | +0.229 ns | 0.000 ns | PASS |
+| NR04 | +0.426 ns | +0.547 ns | 0.000 ns | PASS |
+| 현재 코어 | +0.426 ns | +0.547 ns | 0.000 ns | PASS |
+
+| Version | TX Slice LUT | TX register | RX Slice LUT | RX register |
+|---|---:|---:|---:|---:|
+| NR03 | 3,413 | 4,073 | 3,335 | 4,204 |
+| NR04 | 3,519 | 4,330 | 3,428 | 4,460 |
+| 현재 코어 | 3,519 | 4,330 | 3,428 | 4,460 |
+
+NR03 대비 현재 코어의 routed WNS는 TX `+0.120 ns`, RX `+0.318 ns`
+증가했습니다. 자원은 TX에서 LUT 106개와 register 257개, RX에서 LUT 93개와
+register 256개 증가했습니다. 이는 키 확장 경로 분리, round-key 선등록 및
+payload 경계 판정 등록에 추가 register와 제어 논리를 사용하는 구조에
+해당합니다. NR04와 현재 코어는 이 조건에서 timing과 자원량이 동일하므로,
+현재 코어는 NR04의 150 MHz 개선 구조를 유지합니다.
 
 ## 검증 항목 및 결과
 
