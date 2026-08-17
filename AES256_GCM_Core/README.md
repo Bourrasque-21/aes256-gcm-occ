@@ -45,6 +45,34 @@ gcm_rx_engine.sv
 authenticated_packet_buffer.sv
 ```
 
+## 전체 설계 구조
+
+TX와 RX는 각각 AES-256 코어 하나와 GHASH 코어 하나를 사용합니다. TX의
+ciphertext와 RX에 수신된 ciphertext는 인증 대상인 GHASH 입력으로 들어가며,
+RX에서 복원된 plaintext는 TAG 판정이 끝날 때까지 별도 buffer에 격리됩니다.
+
+```text
+                              ┌───────────────┐
+Plaintext ──> AES-CTR XOR ──> │  Ciphertext   │ ──> TX output
+                 │            └───────┬───────┘
+                 │                    │
+Key, IV ──> AES-256 core              └──> GHASH ──> TAG
+
+Ciphertext ──┬──> AES-CTR XOR ──> 미인증 Plaintext ──> Packet Buffer ──> 인증 출력
+             │                                             ▲
+             └──> GHASH ──> Calculated TAG ──> 비교 ───────┘
+                                           Received TAG
+```
+
+| 모듈 | 역할 | 주요 내부 구조 |
+|---|---|---|
+| `gcm_tx_engine` | plaintext 암호화 및 TAG 생성 | AES-CTR와 ciphertext GHASH의 중첩 스케줄링 |
+| `gcm_rx_engine` | ciphertext 복호화 및 TAG 판정 | AES-CTR와 ciphertext GHASH 병렬 실행, 미인증 평문 출력 |
+| `aes256_core` | 128비트 AES-256 블록 암호화 | 반복형 14-round datapath, 라운드 키 cache 및 prefetch |
+| `ghash_engine_seq` | `Y_next=(Y XOR X)·H` 계산 제어 | 8비트 순차 GF 곱셈기 구동 |
+| `gf128_mult_8bit_seq` | GF(2^128) 곱셈 | 매 클럭 8비트 처리, 16단계 입력 shift |
+| `authenticated_packet_buffer` | 인증 전 평문 임시 보관 | block RAM 추론 배열, 인증 성공 후에만 순차 출력 |
+
 ## 코어 인터페이스
 
 한 명령은 하나의 GCM message를 정의합니다.
@@ -61,6 +89,36 @@ ciphertext 블록과 수신 TAG를 받아 plaintext 블록 및 `auth_valid/auth_
 출력합니다. 고정 80블록 packet은 상위 시스템에서
 `cmd_payload_blocks=80`으로 지정하며, 코어 자체는 message 길이를 명령으로 받습니다.
 
+### 처리 형식
+
+| 항목 | 현재 RTL 형식 |
+|---|---|
+| AES key | 256비트 |
+| IV | 96비트 |
+| AAD | 128비트 1블록 |
+| Payload | `cmd_payload_blocks`개의 128비트 full block |
+| TAG | 128비트 |
+| 첫 payload counter | `{cmd_iv, 32'd2}` |
+| 길이 블록 | `{64'd128, cmd_payload_blocks × 128}` |
+
+부분 블록과 가변 길이 AAD는 현재 인터페이스에 포함하지 않습니다. TX와 RX는
+명령에서 받은 payload 블록 수를 기준으로 마지막 블록과 GCM 길이 블록을 계산합니다.
+
+### `valid/ready` 동작
+
+| 전송 | 성립 조건 | 동작 |
+|---|---|---|
+| 명령 입력 | `cmd_valid && cmd_ready` | key, IV, AAD, payload 길이를 내부 register에 저장 |
+| TX 평문 입력 | `plaintext_valid && plaintext_ready` | 한 블록을 받아 현재 keystream과 XOR |
+| RX 암호문 입력 | `ciphertext_valid && ciphertext_ready` | 한 블록을 AES-CTR 및 GHASH 처리 대상으로 저장 |
+| TX 결과 출력 | `ciphertext_valid && ciphertext_ready` | ciphertext 전달 후 현재 블록의 GHASH 시작 |
+| TAG 출력 | `tag_valid && tag_ready` | TX message 종료 |
+| 인증 결과 | `auth_valid && auth_ready` | RX message 종료 |
+
+출력 측 `ready`가 내려가면 엔진은 해당 출력 상태와 데이터를 유지합니다. `busy`는
+명령을 수락한 시점부터 전체 message 처리가 끝날 때까지 유지되며, `abort`는 진행
+중인 message를 취소하고 내부 AES/GHASH 연산이 정리된 뒤 idle 상태로 복귀시킵니다.
+
 ### RX 신뢰 경계
 
 `gcm_rx_engine`의 `plaintext_data/plaintext_valid`는 TAG 검증 전에 발생하는
@@ -70,6 +128,71 @@ ciphertext 블록과 수신 TAG를 받아 plaintext 블록 및 `auth_valid/auth_
 
 이 buffer는 AXI에 의존하지 않는 generic `valid/ready` 모듈이며 기본 크기는
 80블록입니다. 다른 buffer를 사용하는 상위 시스템도 같은 인증 경계를 지켜야 합니다.
+
+buffer의 `PAYLOAD_BLOCKS` 값은 해당 RX message의 `cmd_payload_blocks`와 같아야
+합니다. `packet_start_valid`에서 session/frame/packet 메타데이터를 함께 저장하고,
+평문 블록을 모두 받은 뒤 다음과 같이 분기합니다.
+
+```text
+B_IDLE -> B_WRITE -> B_WAIT_AUTH
+                           ├─ auth_ok=1 -> B_READ_PREP -> B_READ -> packet_complete
+                           └─ auth_ok=0 -> B_IDLE (외부 출력 없음)
+```
+
+## GCM 연산 흐름
+
+96비트 IV를 사용하므로 초기 counter와 첫 payload counter는 다음과 같습니다.
+
+```text
+H       = AES_K(0^128)
+J0      = IV || 0x00000001
+CTR_i   = IV || (i + 2)                 (i = 0, 1, ...)
+S0      = AES_K(J0)
+C_i     = P_i XOR AES_K(CTR_i)
+Y_AAD   = (0^128 XOR AAD) · H
+Y_i+1   = (Y_i XOR C_i) · H
+LEN     = 64'd128 || (payload_blocks × 128)
+TAG     = S0 XOR ((Y_last XOR LEN) · H)
+```
+
+GHASH에는 TX/RX 모두 ciphertext가 입력됩니다. 따라서 RX는 plaintext 복원과
+인증값 누적을 동시에 실행할 수 있고, 마지막에는 수신 TAG와 계산 TAG를 128비트
+전체 비교하여 `auth_ok`를 결정합니다.
+
+### TX 상태 진행
+
+```text
+IDLE
+  -> H 계산 또는 동일 key의 H 재사용
+  -> J0 암호화 + AAD GHASH
+  -> 첫 CTR keystream 사전 계산
+  -> 평문 입력 및 ciphertext 출력
+  -> 현재 ciphertext GHASH + 다음 CTR keystream 계산 (반복)
+  -> LEN GHASH
+  -> TAG 출력
+```
+
+첫 블록의 keystream을 미리 계산해 둔 뒤, ciphertext 한 블록이 출력될 때마다
+현재 ciphertext의 GHASH와 다음 counter의 AES 암호화를 동시에 시작합니다. 마지막
+블록에서는 다음 keystream이 필요 없으므로 GHASH 완료 후 바로 LEN 처리로 이동합니다.
+
+### RX 상태 진행
+
+```text
+IDLE
+  -> H 계산 또는 동일 key의 H 재사용
+  -> J0 암호화 + AAD GHASH
+  -> ciphertext 입력
+  -> 현재 counter AES 암호화 + ciphertext GHASH
+  -> 미인증 plaintext 출력 (반복)
+  -> LEN GHASH
+  -> 수신 TAG 대기 및 비교
+  -> auth_valid/auth_ok 출력
+```
+
+RX 엔진은 ciphertext를 받은 뒤 같은 블록에 대해 AES-CTR과 GHASH를 동시에
+시작합니다. 두 연산의 `done` 시점은 독립 register에 저장하며, 양쪽이 모두
+완료된 뒤에만 plaintext 출력과 다음 블록 처리를 진행합니다.
 
 ## 블록 수준 병렬 처리
 
@@ -91,8 +214,9 @@ Ciphertext C_i --+-- AES-CTR -> Plaintext P_i
                  +-- GHASH   -> authentication state
 ```
 
-AES 연산은 약 14클럭, GHASH는 16클럭이지만 두 연산을 중첩하여 정상 payload
-구간의 구조적 블록 처리 간격을 약 16클럭으로 유지합니다.
+AES round datapath는 14라운드, GF 곱셈기의 `M_RUN` 구간은 16클럭입니다. 두
+연산을 중첩하므로 순차 실행 시 약 30클럭이던 산술 구간은 더 긴 GHASH 연산이
+지배합니다. 실제 블록 간격에는 입출력 handshake와 FSM 전이 클럭이 추가됩니다.
 
 ## 연산 경로 개선
 
